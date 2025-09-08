@@ -1,5 +1,5 @@
 const bot = require('@src/bot/telegramBot');
-const { PRODUCT, buildPrices, sanitizePrices, validatePrices } = require('@src/config/product');
+const { PRODUCT, buildPrices, sanitizePrices, validatePrices, getProviderToken, getCurrencyOrThrow } = require('@src/config/product');
 
 function maskProviderToken(token) {
   if (!token || typeof token !== 'string') return '';
@@ -16,6 +16,14 @@ function safeJSONStringify(value) {
   }
 }
 
+function deepCleanJSON(value) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (_) {
+    return value;
+  }
+}
+
 async function sendInvoiceToChat(req, res) {
   try {
     const { chatId } = req.body || {};
@@ -28,31 +36,49 @@ async function sendInvoiceToChat(req, res) {
       });
     }
 
-    const pricesRaw = buildPrices();
-    const prices = sanitizePrices(pricesRaw);
-    validatePrices(prices);
+    // Build -> sanitize -> validate -> deep clean -> validate again
+    const pricesBuilt = buildPrices();
+    const pricesSanitized = sanitizePrices(pricesBuilt);
+    validatePrices(pricesSanitized);
+    const safePrices = deepCleanJSON(pricesSanitized);
+    validatePrices(safePrices);
+
+    const providerToken = getProviderToken();
+    const currency = getCurrencyOrThrow();
 
     console.log('API /payments/invoice -> sending invoice with params:', {
       chatId: numericChatId,
-      currency: PRODUCT.currency,
-      providerTokenMasked: maskProviderToken(PRODUCT.providerToken),
-      pricesType: typeof prices,
-      pricesLength: Array.isArray(prices) ? prices.length : 'n/a',
-      pricesJSON: safeJSONStringify(prices),
+      currency,
+      providerTokenMasked: maskProviderToken(providerToken),
+      pricesType: typeof safePrices,
+      pricesLength: Array.isArray(safePrices) ? safePrices.length : 'n/a',
+      pricesJSON: safeJSONStringify(safePrices),
     });
 
-    const tgResponse = await bot.sendInvoice(
-      numericChatId,
-      PRODUCT.title,
-      PRODUCT.description,
-      PRODUCT.payload,
-      PRODUCT.providerToken,
-      PRODUCT.startParameter,
-      PRODUCT.currency,
-      prices
-    );
+    try {
+      const tgResponse = await bot.sendInvoice(
+        numericChatId,
+        PRODUCT.title,
+        PRODUCT.description,
+        PRODUCT.payload,
+        providerToken,
+        PRODUCT.startParameter,
+        currency,
+        safePrices
+      );
 
-    return res.status(200).json({ ok: true, data: tgResponse });
+      return res.status(200).json({ ok: true, data: tgResponse });
+    } catch (sendErr) {
+      console.error('sendInvoice error (API controller):', sendErr?.message || sendErr);
+      if (sendErr?.response?.body) {
+        console.error('Telegram response body:', sendErr.response.body);
+      }
+      return res.status(500).json({
+        ok: false,
+        error: sendErr?.message || String(sendErr),
+        details: sendErr?.response?.body || sendErr?.response || sendErr?.stack || null,
+      });
+    }
   } catch (err) {
     const details = err?.response?.body || err?.response?.data || err?.response || err?.stack || null;
     return res.status(500).json({
@@ -79,8 +105,8 @@ async function getProduct(req, res) {
 
 async function getPricesPreview(req, res) {
   try {
-    const raw = buildPrices();
-    const prices = sanitizePrices(raw);
+    const built = buildPrices();
+    const prices = deepCleanJSON(sanitizePrices(built));
 
     let valid = false;
     const errors = [];

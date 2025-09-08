@@ -43,14 +43,6 @@ function sanitizePrices(prices) {
   return result;
 }
 
-function buildPrices() {
-  const amount = toMinorUnits(PRODUCT.priceRub); // integer in minor units
-  const raw = [
-    { label: PRODUCT.title, amount }
-  ];
-  return sanitizePrices(raw);
-}
-
 function validatePrices(prices) {
   if (!Array.isArray(prices) || prices.length === 0) {
     throw new Error('prices must be a non-empty array');
@@ -76,4 +68,25 @@ function validatePrices(prices) {
   return true;
 }
 
-module.exports = { PRODUCT, buildPrices, sanitizePrices, validatePrices };
+function getProviderToken() {
+  const token = String(PRODUCT.providerToken || '').trim();
+  if (!token) throw new Error('providerToken must be a non-empty string');
+  return token;
+}
+
+function getCurrencyOrThrow() {
+  const currency = String(PRODUCT.currency || '').trim();
+  if (currency !== 'RUB') throw new Error("currency must be 'RUB'");
+  return currency;
+}
+
+function buildPrices() {
+  const amount = toMinorUnits(PRODUCT.priceRub); // integer in minor units
+  const raw = [{ label: PRODUCT.title, amount }];
+  const sanitized = sanitizePrices(raw);
+  // Ensure buildPrices returns a strictly valid array
+  validatePrices(sanitized);
+  return sanitized;
+}
+
+module.exports = { PRODUCT, buildPrices, sanitizePrices, validatePrices, getProviderToken, getCurrencyOrThrow };

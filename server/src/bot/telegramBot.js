@@ -1,6 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const Payment = require('@src/models/Payment');
-const { PRODUCT, buildPrices, sanitizePrices, validatePrices } = require('@src/config/product');
+const { PRODUCT, buildPrices, sanitizePrices, validatePrices, getProviderToken, getCurrencyOrThrow } = require('@src/config/product');
 
 // Constants (no .env as requested)
 const BOT_TOKEN = '7443123336:AAEY0axnHAS12fYJnV-JdAp_lYDuRDL1Swo';
@@ -25,6 +25,14 @@ function safeJSONStringify(value) {
   }
 }
 
+function deepCleanJSON(value) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (_) {
+    return value;
+  }
+}
+
 // /start command
 bot.onText(/^\/start$/, async (msg) => {
   try {
@@ -46,17 +54,22 @@ bot.on('message', async (msg) => {
 
     // Exact match "Купить"
     if (msg.text && msg.text.trim() === 'Купить') {
-      const rawPrices = buildPrices();
-      const prices = sanitizePrices(rawPrices);
-      validatePrices(prices);
+      const built = buildPrices();
+      const sanitized = sanitizePrices(built);
+      validatePrices(sanitized);
+      const safePrices = deepCleanJSON(sanitized);
+      validatePrices(safePrices);
+
+      const providerToken = getProviderToken();
+      const currency = getCurrencyOrThrow();
 
       console.log('Preparing to send invoice (bot handler):', {
         chatId,
-        currency: PRODUCT.currency,
-        providerTokenMasked: maskProviderToken(PRODUCT.providerToken),
-        pricesType: typeof prices,
-        pricesLength: Array.isArray(prices) ? prices.length : 'n/a',
-        pricesJSON: safeJSONStringify(prices),
+        currency,
+        providerTokenMasked: maskProviderToken(providerToken),
+        pricesType: typeof safePrices,
+        pricesLength: Array.isArray(safePrices) ? safePrices.length : 'n/a',
+        pricesJSON: safeJSONStringify(safePrices),
       });
 
       try {
@@ -65,10 +78,10 @@ bot.on('message', async (msg) => {
           PRODUCT.title,
           PRODUCT.description,
           PRODUCT.payload,
-          PRODUCT.providerToken,
+          providerToken,
           PRODUCT.startParameter,
-          PRODUCT.currency,
-          prices
+          currency,
+          safePrices
         );
       } catch (sendErr) {
         console.error('sendInvoice error (bot handler):', sendErr?.message || sendErr);

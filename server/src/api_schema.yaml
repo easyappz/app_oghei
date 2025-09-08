@@ -1,9 +1,13 @@
 openapi: 3.0.3
 info:
   title: Easyappz Payments API
-  version: 1.1.0
+  version: 1.1.1
   description: |
     API endpoints for Telegram Payments integration (native sendInvoice). All paths are prefixed with /api on the server.
+
+    Notes:
+    - Prices are constructed in minor currency units (RUB -> kopecks) and validated as positive integers.
+    - Before calling Telegram, the server performs a deep JSON clean (JSON.stringify/parse) of prices to avoid serialization issues that can lead to "can't parse prices JSON object" errors.
 servers:
   - url: http://localhost:3001
 paths:
