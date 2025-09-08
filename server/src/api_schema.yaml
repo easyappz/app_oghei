@@ -1,0 +1,141 @@
+openapi: 3.0.3
+info:
+  title: Easyappz Payments API
+  version: 1.0.0
+  description: |
+    API endpoints for Telegram Payments integration (native sendInvoice). All paths are prefixed with /api on the server.
+servers:
+  - url: http://localhost:3001
+paths:
+  /api/hello:
+    get:
+      summary: Hello endpoint
+      responses:
+        '200':
+          description: Successful hello response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Hello from API!
+  /api/status:
+    get:
+      summary: Status endpoint
+      responses:
+        '200':
+          description: Service status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: '2025-01-01T12:00:00.000Z'
+  /api/payments/product:
+    get:
+      summary: Get product info for the Arabic course
+      responses:
+        '200':
+          description: Product details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+  /api/payments/invoice:
+    post:
+      summary: Send invoice to a Telegram chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceRequest'
+            examples:
+              example1:
+                value:
+                  chatId: 123456789
+      responses:
+        '200':
+          description: Invoice dispatch result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceResponse'
+              examples:
+                success:
+                  value:
+                    ok: true
+                    data:
+                      message_id: 100
+                      chat:
+                        id: 123456789
+                      provider_payment_charge_id: null
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceResponse'
+              examples:
+                invalidChatId:
+                  value:
+                    ok: false
+                    error: 'chatId is required and must be a number > 0'
+        '500':
+          description: Server or Telegram API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceResponse'
+components:
+  schemas:
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          example: arabic_course_001
+        title:
+          type: string
+          example: Арабский курс
+        description:
+          type: string
+          example: Интенсивный онлайн‑курс арабского языка для начинающих.
+        currency:
+          type: string
+          enum: [RUB]
+          example: RUB
+        price:
+          type: number
+          example: 5500
+    InvoiceRequest:
+      type: object
+      required: [chatId]
+      properties:
+        chatId:
+          type: number
+          description: Telegram chat ID to send invoice to
+          example: 123456789
+    InvoiceResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        data:
+          description: Raw Telegram API response when ok=true
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        error:
+          description: Error details when ok=false
+          nullable: true
