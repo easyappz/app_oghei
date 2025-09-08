@@ -95,6 +95,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InvoiceResponse'
+              examples:
+                telegramError:
+                  value:
+                    ok: false
+                    error: 'ETELEGRAM: 400 Bad Request: can\'t parse prices JSON object'
+                    details: 'raw telegram response body if available'
 components:
   schemas:
     Product:
@@ -138,4 +144,7 @@ components:
           nullable: true
         error:
           description: Error details when ok=false
+          nullable: true
+        details:
+          description: Optional extended error details (e.g., Telegram response body) for debugging
           nullable: true

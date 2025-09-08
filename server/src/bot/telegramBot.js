@@ -1,25 +1,29 @@
 const TelegramBot = require('node-telegram-bot-api');
 const Payment = require('@src/models/Payment');
+const { PRODUCT, buildPrices, validatePrices } = require('@src/config/product');
 
 // Constants (no .env as requested)
 const BOT_TOKEN = '7443123336:AAEY0axnHAS12fYJnV-JdAp_lYDuRDL1Swo';
-const PROVIDER_TOKEN = '381764678:TEST:140649';
 
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Initialize bot with polling in dev
 const bot = new TelegramBot(BOT_TOKEN, { polling: isDev });
 
-// Product definition
-const PRODUCT = {
-  title: 'Арабский курс',
-  description: 'Онлайн-курс арабского языка: доступ сразу после оплаты. Безопасная оплата через ЮKassa.',
-  currency: 'RUB',
-  providerToken: PROVIDER_TOKEN,
-  payload: 'arabic_course_001',
-  prices: [{ label: 'Арабский курс', amount: 550000 }], // amount in kopecks
-  startParameter: 'buy_arabic_course',
-};
+function maskProviderToken(token) {
+  if (!token || typeof token !== 'string') return '';
+  const len = token.length;
+  if (len <= 10) return '***masked***';
+  return `${token.slice(0, 6)}...${token.slice(-4)}`;
+}
+
+function safeJSONStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return '[unserializable]';
+  }
+}
 
 // /start command
 bot.onText(/^\/start$/, async (msg) => {
@@ -42,6 +46,17 @@ bot.on('message', async (msg) => {
 
     // Exact match "Купить"
     if (msg.text && msg.text.trim() === 'Купить') {
+      const prices = buildPrices();
+      validatePrices(prices);
+
+      console.log('Preparing to send invoice (bot handler):', {
+        chatId,
+        currency: PRODUCT.currency,
+        providerTokenMasked: maskProviderToken(PRODUCT.providerToken),
+        pricesType: typeof prices,
+        pricesJSON: safeJSONStringify(prices),
+      });
+
       await bot.sendInvoice(
         chatId,
         PRODUCT.title,
@@ -50,7 +65,7 @@ bot.on('message', async (msg) => {
         PRODUCT.providerToken,
         PRODUCT.startParameter,
         PRODUCT.currency,
-        PRODUCT.prices
+        prices
       );
       return;
     }
@@ -83,7 +98,7 @@ bot.on('message', async (msg) => {
       }
     }
   } catch (err) {
-    console.error('Error in message handler:', err?.message || err);
+    console.error('Error in message handler:', err?.message || err, err?.response?.body || '');
   }
 });
 
