@@ -1,5 +1,5 @@
 const express = require('express');
-const { sendInvoiceToChat, getProduct } = require('@src/controllers/payments');
+const { sendInvoiceToChat, getProduct, getPricesPreview } = require('@src/controllers/payments');
 
 const router = express.Router();
 
@@ -8,7 +8,7 @@ router.get('/hello', async (req, res) => {
   try {
     res.json({ message: 'Hello from API!' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, details: err?.stack || null });
   }
 });
 
@@ -20,7 +20,7 @@ router.get('/status', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, details: err?.stack || null });
   }
 });
 
@@ -29,7 +29,15 @@ router.get('/payments/product', async (req, res) => {
   try {
     await getProduct(req, res);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, details: err?.stack || null });
+  }
+});
+
+router.get('/payments/prices-preview', async (req, res) => {
+  try {
+    await getPricesPreview(req, res);
+  } catch (err) {
+    res.status(500).json({ error: err.message, details: err?.stack || null });
   }
 });
 
@@ -37,7 +45,7 @@ router.post('/payments/invoice', async (req, res) => {
   try {
     await sendInvoiceToChat(req, res);
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message, details: err?.stack || null });
   }
 });
 

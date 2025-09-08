@@ -13,12 +13,42 @@ const PRODUCT = {
   providerToken: '381764678:TEST:140649',
 };
 
+function toMinorUnits(priceRub) {
+  const n = Number(priceRub);
+  const cents = Math.round(n * 100);
+  return Number.isFinite(cents) ? cents : NaN;
+}
+
+function sanitizePrices(prices) {
+  if (!Array.isArray(prices)) return [];
+  const result = [];
+  for (let i = 0; i < prices.length; i += 1) {
+    const p = prices[i] || {};
+    let label = '';
+    try {
+      label = String(p.label ?? '').trim();
+    } catch (_) {
+      label = '';
+    }
+
+    let amount = Number(p.amount);
+    if (!Number.isFinite(amount)) {
+      amount = NaN;
+    }
+    amount = Math.round(amount);
+
+    // Return only allowed fields
+    result.push({ label, amount });
+  }
+  return result;
+}
+
 function buildPrices() {
-  const price = Number(PRODUCT.priceRub);
-  const amount = Math.round(price * 100); // integer in minor units
-  return [
+  const amount = toMinorUnits(PRODUCT.priceRub); // integer in minor units
+  const raw = [
     { label: PRODUCT.title, amount }
   ];
+  return sanitizePrices(raw);
 }
 
 function validatePrices(prices) {
@@ -30,6 +60,12 @@ function validatePrices(prices) {
     if (!p || typeof p !== 'object') {
       throw new Error(`prices[${i}] must be an object`);
     }
+    const keys = Object.keys(p);
+    const allowed = ['label', 'amount'];
+    const hasOnlyAllowed = keys.every((k) => allowed.includes(k));
+    if (!hasOnlyAllowed) {
+      throw new Error(`prices[${i}] must contain only: label, amount`);
+    }
     if (typeof p.label !== 'string' || p.label.trim().length === 0) {
       throw new Error(`prices[${i}].label must be a non-empty string`);
     }
@@ -40,4 +76,4 @@ function validatePrices(prices) {
   return true;
 }
 
-module.exports = { PRODUCT, buildPrices, validatePrices };
+module.exports = { PRODUCT, buildPrices, sanitizePrices, validatePrices };

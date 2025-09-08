@@ -1,5 +1,5 @@
 const bot = require('@src/bot/telegramBot');
-const { PRODUCT, buildPrices, validatePrices } = require('@src/config/product');
+const { PRODUCT, buildPrices, sanitizePrices, validatePrices } = require('@src/config/product');
 
 function maskProviderToken(token) {
   if (!token || typeof token !== 'string') return '';
@@ -19,7 +19,7 @@ function safeJSONStringify(value) {
 async function sendInvoiceToChat(req, res) {
   try {
     const { chatId } = req.body || {};
-    const numericChatId = Number(chatId);
+    const numericChatId = Math.trunc(Number(chatId));
 
     if (!numericChatId || !Number.isFinite(numericChatId) || numericChatId <= 0) {
       return res.status(400).json({
@@ -28,7 +28,8 @@ async function sendInvoiceToChat(req, res) {
       });
     }
 
-    const prices = buildPrices();
+    const pricesRaw = buildPrices();
+    const prices = sanitizePrices(pricesRaw);
     validatePrices(prices);
 
     console.log('API /payments/invoice -> sending invoice with params:', {
@@ -36,6 +37,7 @@ async function sendInvoiceToChat(req, res) {
       currency: PRODUCT.currency,
       providerTokenMasked: maskProviderToken(PRODUCT.providerToken),
       pricesType: typeof prices,
+      pricesLength: Array.isArray(prices) ? prices.length : 'n/a',
       pricesJSON: safeJSONStringify(prices),
     });
 
@@ -71,8 +73,39 @@ async function getProduct(req, res) {
       price: PRODUCT.priceRub,
     });
   } catch (err) {
-    return res.status(500).json({ error: err?.message || String(err) });
+    return res.status(500).json({ error: err?.message || String(err), details: err?.stack || null });
   }
 }
 
-module.exports = { sendInvoiceToChat, getProduct };
+async function getPricesPreview(req, res) {
+  try {
+    const raw = buildPrices();
+    const prices = sanitizePrices(raw);
+
+    let valid = false;
+    const errors = [];
+    try {
+      validatePrices(prices);
+      valid = true;
+    } catch (e) {
+      errors.push(e?.message || String(e));
+    }
+
+    const payload = {
+      currency: PRODUCT.currency,
+      prices,
+      rawJSON: safeJSONStringify(prices),
+      valid,
+    };
+    if (errors.length > 0) payload.errors = errors;
+
+    return res.status(200).json(payload);
+  } catch (err) {
+    return res.status(500).json({
+      error: err?.message || String(err),
+      details: err?.stack || null,
+    });
+  }
+}
+
+module.exports = { sendInvoiceToChat, getProduct, getPricesPreview };

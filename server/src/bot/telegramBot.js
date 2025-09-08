@@ -1,6 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const Payment = require('@src/models/Payment');
-const { PRODUCT, buildPrices, validatePrices } = require('@src/config/product');
+const { PRODUCT, buildPrices, sanitizePrices, validatePrices } = require('@src/config/product');
 
 // Constants (no .env as requested)
 const BOT_TOKEN = '7443123336:AAEY0axnHAS12fYJnV-JdAp_lYDuRDL1Swo';
@@ -46,7 +46,8 @@ bot.on('message', async (msg) => {
 
     // Exact match "Купить"
     if (msg.text && msg.text.trim() === 'Купить') {
-      const prices = buildPrices();
+      const rawPrices = buildPrices();
+      const prices = sanitizePrices(rawPrices);
       validatePrices(prices);
 
       console.log('Preparing to send invoice (bot handler):', {
@@ -54,19 +55,27 @@ bot.on('message', async (msg) => {
         currency: PRODUCT.currency,
         providerTokenMasked: maskProviderToken(PRODUCT.providerToken),
         pricesType: typeof prices,
+        pricesLength: Array.isArray(prices) ? prices.length : 'n/a',
         pricesJSON: safeJSONStringify(prices),
       });
 
-      await bot.sendInvoice(
-        chatId,
-        PRODUCT.title,
-        PRODUCT.description,
-        PRODUCT.payload,
-        PRODUCT.providerToken,
-        PRODUCT.startParameter,
-        PRODUCT.currency,
-        prices
-      );
+      try {
+        await bot.sendInvoice(
+          chatId,
+          PRODUCT.title,
+          PRODUCT.description,
+          PRODUCT.payload,
+          PRODUCT.providerToken,
+          PRODUCT.startParameter,
+          PRODUCT.currency,
+          prices
+        );
+      } catch (sendErr) {
+        console.error('sendInvoice error (bot handler):', sendErr?.message || sendErr);
+        if (sendErr?.response?.body) {
+          console.error('Telegram response body:', sendErr.response.body);
+        }
+      }
       return;
     }
 
