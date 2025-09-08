@@ -162,7 +162,8 @@ export default function PaymentsDashboard() {
   }
 
   const pricesArray = Array.isArray(preview?.prices) ? preview.prices : [];
-  const validation = preview?.validation || null;
+  const validFlag = typeof preview?.valid === 'boolean' ? preview.valid : null;
+  const previewErrors = Array.isArray(preview?.errors) ? preview.errors : [];
   const rawJSONStr = typeof preview?.rawJSON === 'string' ? preview.rawJSON : (preview?.rawJSON ? serialize(preview.rawJSON) : '');
 
   return (
@@ -311,12 +312,12 @@ export default function PaymentsDashboard() {
               <div className="kv" style={{ marginTop: 10 }}>
                 <div className="kv-key">Валидация сервера</div>
                 <div className="kv-value">
-                  {validation ? (
-                    <div className={`status ${validation?.valid ? 'success' : 'error'}`} style={{ marginTop: 0 }}>
-                      <div className="status-title">{validation?.valid ? 'OK: Валидация пройдена' : 'Ошибка: Валидация не пройдена'}</div>
-                      {Array.isArray(validation?.errors) && validation.errors.length > 0 && (
+                  {validFlag !== null ? (
+                    <div className={`status ${validFlag ? 'success' : 'error'}`} style={{ marginTop: 0 }}>
+                      <div className="status-title">{validFlag ? 'OK: Валидация пройдена' : 'Ошибка: Валидация не пройдена'}</div>
+                      {previewErrors.length > 0 && (
                         <ul className="diag-errors">
-                          {validation.errors.map((e, i) => (
+                          {previewErrors.map((e, i) => (
                             <li key={String(i)}>{typeof e === 'string' ? e : serialize(e)}</li>
                           ))}
                         </ul>
