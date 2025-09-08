@@ -1,12 +1,43 @@
 import instance from './axios';
 
+function safeParseJSON(value) {
+  if (value == null) return null;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return value;
+  }
+}
+
+function normalizeApiError(error, defaultMessage) {
+  const status = error?.response?.status;
+  const data = error?.response?.data;
+  const message = (data && (data.message || data.error)) || error?.message || defaultMessage || 'Request failed';
+  const url = error?.config?.url;
+  const method = error?.config?.method;
+  const payload = error?.config?.data ? safeParseJSON(error.config.data) : undefined;
+
+  return {
+    name: 'ApiError',
+    message,
+    status,
+    data,
+    url,
+    method,
+    request: {
+      headers: error?.config?.headers,
+      payload,
+    },
+  };
+}
+
 export async function getProduct() {
   try {
     const response = await instance.get('/api/payments/product');
     return response.data;
   } catch (error) {
-    const message = error?.response?.data?.message || error?.message || 'Request failed';
-    throw new Error(message);
+    throw normalizeApiError(error, 'Не удалось загрузить товар');
   }
 }
 
@@ -15,7 +46,6 @@ export async function sendInvoice(chatId) {
     const response = await instance.post('/api/payments/invoice', { chatId: Number(chatId) });
     return response.data;
   } catch (error) {
-    const message = error?.response?.data?.message || error?.message || 'Request failed';
-    throw new Error(message);
+    throw normalizeApiError(error, 'Не удалось отправить счёт');
   }
 }
