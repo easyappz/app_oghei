@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { getProduct, sendInvoice } from '../api/payments';
+import { getProduct, sendInvoice, getPricesPreview } from '../api/payments';
 
 function formatCurrencyRUB(value) {
   if (typeof value !== 'number') return '';
@@ -40,6 +40,13 @@ export default function PaymentsDashboard() {
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
+
+  // Prices preview diagnostics
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+  const [previewUnavailable, setPreviewUnavailable] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [showPreviewDetails, setShowPreviewDetails] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -106,7 +113,6 @@ export default function PaymentsDashboard() {
       });
       if (!ok) setShowDetails(true);
     } catch (err) {
-      // err is a normalized error from api/payments or native Error
       const status = err?.status;
       const errMessage = err?.message || 'Произошла ошибка при отправке счёта.';
       const serverData = err?.data;
@@ -116,7 +122,7 @@ export default function PaymentsDashboard() {
       let hint = null;
       const textForCheck = `${combinedMessage}`;
       if (textForCheck && textForCheck.includes('ETELEGRAM')) {
-        hint = 'Telegram вернул ошибку. Проверьте корректность данных товара и формата цен на сервере (prices должны быть корректным JSON массивом объектов с полями label и amount в копейках).';
+        hint = 'Telegram вернул ошибку. Проверьте корректность данных товара и формата цен на сервере (prices должны быть корректным JSON массивом объектов с полями label и amount в копейках), валюту и providerToken.';
       }
 
       setResult({
@@ -134,6 +140,31 @@ export default function PaymentsDashboard() {
     }
   }
 
+  async function handlePreview() {
+    setPreviewError('');
+    setPreviewUnavailable(false);
+    setPreview(null);
+    setShowPreviewDetails(false);
+    try {
+      setPreviewLoading(true);
+      const data = await getPricesPreview();
+      setPreview(data || {});
+    } catch (err) {
+      if (err?.status === 404) {
+        setPreviewUnavailable(true);
+      } else {
+        const message = err?.message || 'Не удалось получить предпросмотр цен.';
+        setPreviewError(message);
+      }
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  const pricesArray = Array.isArray(preview?.prices) ? preview.prices : [];
+  const validation = preview?.validation || null;
+  const rawJSONStr = typeof preview?.rawJSON === 'string' ? preview.rawJSON : (preview?.rawJSON ? serialize(preview.rawJSON) : '');
+
   return (
     <div className="page">
       <main className="container">
@@ -149,6 +180,9 @@ export default function PaymentsDashboard() {
                 <h3 className="product-title">{product?.title || 'Товар'}</h3>
                 <p className="product-desc">{product?.description || 'Описание товара появится позже.'}</p>
                 <div className="product-price">{formatCurrencyRUB(product?.price)}</div>
+                {product?.currency && (
+                  <div className="muted-small">Валюта: {product.currency}</div>
+                )}
               </div>
             </div>
           )}
@@ -213,12 +247,111 @@ export default function PaymentsDashboard() {
         </section>
 
         <section className="section">
+          <h2 className="section-title">Диагностика цен</h2>
+          <div className="hint">Получите предпросмотр массива prices, который сервер отправит в Telegram, а также результаты серверной валидации. Это поможет быстро выявить причину ошибки вида: "ETELEGRAM: 400 Bad Request: can't parse prices JSON object".</div>
+          <button className="button" onClick={handlePreview} disabled={previewLoading}>
+            {previewLoading ? (
+              <span className="btn-loading"><span className="spinner" /> Загружаем предпросмотр...</span>
+            ) : (
+              'Проверить цены'
+            )}
+          </button>
+
+          {previewUnavailable && (
+            <div className="status error" style={{ marginTop: 10 }}>
+              <div className="status-title">Диагностика временно недоступна</div>
+              <div className="status-text">Эндпоинт /api/payments/prices-preview не найден (404). Скорее всего, бэкенд ещё не обновлён. Продолжайте тестировать отправку счёта, а после обновления сервера повторите попытку. Подсказка: на сервере должен формироваться валидный JSON массив объектов с полями label и amount (в копейках), а также корректная валюта и providerToken.</div>
+            </div>
+          )}
+
+          {previewError && (
+            <div className="status error" style={{ marginTop: 10 }}>
+              <div className="status-title">Ошибка диагностики</div>
+              <div className="status-text">{previewError}</div>
+            </div>
+          )}
+
+          {preview && !previewUnavailable && !previewError && (
+            <div className="diag-card">
+              <div className="kv">
+                <div className="kv-key">Валюта</div>
+                <div className="kv-value"><span className="badge">{preview?.currency || '—'}</span></div>
+              </div>
+
+              <div className="kv" style={{ marginTop: 10 }}>
+                <div className="kv-key">Prices</div>
+                <div className="kv-value">
+                  {pricesArray.length === 0 && (
+                    <div className="muted-small">Массив цен пуст или не сформирован.</div>
+                  )}
+                  {pricesArray.length > 0 && (
+                    <ul className="prices-list">
+                      {pricesArray.map((p, idx) => (
+                        <li key={String(idx)} className="price-item">
+                          <div className="price-label">{typeof p?.label === 'string' ? p.label : '—'}</div>
+                          <div className="price-amount">amount: {typeof p?.amount === 'number' ? p.amount : '—'} (в копейках)</div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+
+              <div className="kv" style={{ marginTop: 10 }}>
+                <div className="kv-key">rawJSON</div>
+                <div className="kv-value">
+                  {rawJSONStr ? (
+                    <pre className="code-block" style={{ maxHeight: 200 }}>{rawJSONStr}</pre>
+                  ) : (
+                    <div className="muted-small">Нет данных rawJSON.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="kv" style={{ marginTop: 10 }}>
+                <div className="kv-key">Валидация сервера</div>
+                <div className="kv-value">
+                  {validation ? (
+                    <div className={`status ${validation?.valid ? 'success' : 'error'}`} style={{ marginTop: 0 }}>
+                      <div className="status-title">{validation?.valid ? 'OK: Валидация пройдена' : 'Ошибка: Валидация не пройдена'}</div>
+                      {Array.isArray(validation?.errors) && validation.errors.length > 0 && (
+                        <ul className="diag-errors">
+                          {validation.errors.map((e, i) => (
+                            <li key={String(i)}>{typeof e === 'string' ? e : serialize(e)}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="muted-small">Сервер не прислал результат валидации.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="details-toggle" style={{ marginTop: 8 }}>
+                <button className="link-button" onClick={() => setShowPreviewDetails((v) => !v)}>
+                  {showPreviewDetails ? 'Скрыть ответ сервера' : 'Показать полный ответ сервера'}
+                </button>
+              </div>
+              {showPreviewDetails && (
+                <div className="details-grid" style={{ gridTemplateColumns: '1fr' }}>
+                  <div>
+                    <div className="muted-small">Ответ</div>
+                    <pre className="code-block">{serialize(preview)}</pre>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        <section className="section">
           <h2 className="section-title">Подсказки</h2>
           <div className="tips">
             <ul>
               <li>Чтобы узнать свой Chat ID: напишите боту любое сообщение, затем посмотрите логи бота или консоль сервера. Часто Chat ID отображается в ответах Telegram API.</li>
-              <li>Если видите ошибку вида "ETELEGRAM: 400 Bad Request: can't parse prices JSON object" — проверьте на сервере формирование объекта цен: это должен быть корректный JSON массив с полями label и amount (в копейках), а также корректная валюта.</li>
-              <li>При повторяющихся ошибках проверьте токен бота, права, доступность Telegram API и соответствие body запроса схеме.</li>
+              <li>Если видите ошибку вида "ETELEGRAM: 400 Bad Request: can't parse prices JSON object" — проверьте на сервере формирование объекта цен: корректный JSON массив объектов с полями label и amount (в копейках), валюта и providerToken.</li>
+              <li>При повторяющихся ошибках проверьте токен бота, права, доступность Telegram API и соответствие тела запроса схеме.</li>
               <li>Используйте валидный Chat ID (целое положительное число без пробелов и символов).</li>
             </ul>
           </div>

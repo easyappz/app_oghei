@@ -49,3 +49,13 @@ export async function sendInvoice(chatId) {
     throw normalizeApiError(error, 'Не удалось отправить счёт');
   }
 }
+
+export async function getPricesPreview() {
+  try {
+    const response = await instance.get('/api/payments/prices-preview');
+    return response.data;
+  } catch (error) {
+    // Пробрасываем нормализованную ошибку, UI обработает 404 как недоступность диагностики
+    throw normalizeApiError(error, 'Не удалось получить предпросмотр цен');
+  }
+}
