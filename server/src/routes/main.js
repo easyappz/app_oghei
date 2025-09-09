@@ -1,5 +1,5 @@
 const express = require('express');
-const { sendInvoiceToChat, getProduct, getPricesPreview, testTelegramInvoice, telegramHealth } = require('@src/controllers/payments');
+const { sendInvoiceToChat, getProduct, getPricesPreview, testTelegramInvoice, telegramHealth, getTelegramMeta } = require('@src/controllers/payments');
 
 const router = express.Router();
 
@@ -61,6 +61,15 @@ router.post('/payments/telegram/invoice/test', async (req, res) => {
 router.get('/payments/telegram/health', async (req, res) => {
   try {
     await telegramHealth(req, res);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message, details: err?.stack || null });
+  }
+});
+
+// New: Telegram bot metadata for frontend
+router.get('/payments/telegram/meta', async (req, res) => {
+  try {
+    await getTelegramMeta(req, res);
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message, details: err?.stack || null });
   }

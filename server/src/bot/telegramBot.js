@@ -12,6 +12,52 @@ const isDev = process.env.NODE_ENV !== 'production';
 // Initialize bot with polling in dev
 const bot = new TelegramBot(BOT_TOKEN, { polling: isDev });
 
+// Bot metadata
+let BOT_USERNAME = null;
+
+async function fetchBotUsernameOnce({ retry = false } = {}) {
+  try {
+    const me = await bot.getMe();
+    if (me && me.username) {
+      BOT_USERNAME = me.username;
+      console.log(`[telegramBot] Bot username loaded: @${BOT_USERNAME}`);
+    } else {
+      throw new Error('getMe() returned without username');
+    }
+  } catch (e) {
+    console.error('[telegramBot] getMe() failed:', e?.message || String(e));
+    if (!retry) {
+      setTimeout(() => {
+        fetchBotUsernameOnce({ retry: true }).catch((err) => {
+          console.error('[telegramBot] getMe() retry failed:', err?.message || String(err));
+        });
+      }, 1500);
+    }
+  }
+}
+
+function getBotUsername() {
+  return BOT_USERNAME;
+}
+
+function buildDeepLinks(username, startParameter) {
+  if (!username) return { mobile: null, desktop: null, web: null };
+  const start = encodeURIComponent(String(startParameter || ''));
+  const mobile = `tg://resolve?domain=${username}&start=${start}`;
+  const desktop = `https://t.me/${username}?start=${start}`;
+  const web = `https://t.me/${username}?start=${start}`;
+  return { mobile, desktop, web };
+}
+
+function getBotMeta() {
+  const username = getBotUsername();
+  const deepLinks = buildDeepLinks(username, PRODUCT.startParameter);
+  return { username, deepLinks };
+}
+
+// Try to load username on startup
+fetchBotUsernameOnce();
+
 function maskProviderToken(token) {
   if (!token || typeof token !== 'string') return '';
   const len = token.length;
@@ -147,13 +193,44 @@ async function sendInvoiceSafe(botInstance, args) {
   }
 }
 
+async function sendDeepLinkHint(chatId) {
+  try {
+    const meta = getBotMeta();
+    const hasUsername = !!meta.username;
+
+    const text = hasUsername
+      ? 'Если счет не открылся автоматически, откройте диалог с ботом и повторите попытку. Выберите способ:'
+      : 'Если счет не открылся автоматически, попробуйте открыть диалог с ботом и повторить попытку в приложении Telegram.';
+
+    const options = hasUsername
+      ? {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: 'Открыть в мобильном Telegram', url: meta.deepLinks.mobile },
+                { text: 'Открыть в Telegram Desktop/Web', url: meta.deepLinks.desktop },
+              ],
+            ],
+          },
+        }
+      : {};
+
+    const sent = await bot.sendMessage(chatId, text, options);
+    console.log('[deep-link-hint] sent to chat:', chatId, 'message_id:', sent?.message_id || null);
+    return true;
+  } catch (err) {
+    console.error('[deep-link-hint] error:', err?.message || String(err), err?.response?.body || '');
+    return false;
+  }
+}
+
 // /start command
 bot.onText(/^\/start$/, async (msg) => {
   try {
     const chatId = msg.chat.id;
     const welcome = [
       'Привет! Это оплата за "Арабский курс" (5500 ₽).',
-      'Чтобы оформить покупку, отправьте сообщение: Купить'
+      'Чтобы оформить покупку, отправьте сообщение: Купить',
     ].join('\n');
     await bot.sendMessage(chatId, welcome);
   } catch (err) {
@@ -188,6 +265,14 @@ bot.on('message', async (msg) => {
         const body = sendErr?.responseBody || sendErr?.response?.body || null;
         if (body) console.error('Telegram error body:', body);
       }
+
+      // Always send deep-link hint independently
+      try {
+        await sendDeepLinkHint(chatId);
+      } catch (hintErr) {
+        console.error('sendDeepLinkHint error (bot handler):', hintErr?.message || String(hintErr));
+      }
+
       return;
     }
 
@@ -213,7 +298,10 @@ bot.on('message', async (msg) => {
 
       // Notify user
       try {
-        await bot.sendMessage(chatId, 'Оплата успешно получена! Спасибо. Доступ к курсу будет предоставлен в ближайшее время.');
+        await bot.sendMessage(
+          chatId,
+          'Оплата успешно получена! Спасибо. Доступ к курсу будет предоставлен в ближайшее время.'
+        );
       } catch (sendErr) {
         console.error('Send confirmation error:', sendErr?.message || sendErr);
       }
@@ -232,4 +320,4 @@ bot.on('pre_checkout_query', async (query) => {
   }
 });
 
-module.exports = { bot, sendInvoiceSafe };
+module.exports = { bot, sendInvoiceSafe, getBotMeta, getBotUsername, sendDeepLinkHint };
