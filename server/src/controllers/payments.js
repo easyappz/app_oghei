@@ -1,5 +1,6 @@
-const bot = require('@src/bot/telegramBot');
-const { PRODUCT, buildPrices, sanitizePrices, validatePrices, getProviderToken, getCurrencyOrThrow } = require('@src/config/product');
+const { bot, sendInvoiceSafe } = require('@src/bot/telegramBot');
+const { PRODUCT } = require('@src/config/product');
+const { buildLabeledPricesFromProduct, stringifyPrices } = require('@src/bot/payments');
 
 function maskProviderToken(token) {
   if (!token || typeof token !== 'string') return '';
@@ -36,47 +37,28 @@ async function sendInvoiceToChat(req, res) {
       });
     }
 
-    // Build -> sanitize -> validate -> deep clean -> validate again
-    const pricesBuilt = buildPrices();
-    const pricesSanitized = sanitizePrices(pricesBuilt);
-    validatePrices(pricesSanitized);
-    const safePrices = deepCleanJSON(pricesSanitized);
-    validatePrices(safePrices);
-
-    const providerToken = getProviderToken();
-    const currency = getCurrencyOrThrow();
-
-    console.log('API /payments/invoice -> sending invoice with params:', {
+    const args = {
       chatId: numericChatId,
-      currency,
-      providerTokenMasked: maskProviderToken(providerToken),
-      pricesType: typeof safePrices,
-      pricesLength: Array.isArray(safePrices) ? safePrices.length : 'n/a',
-      pricesJSON: safeJSONStringify(safePrices),
-    });
+      title: PRODUCT.title,
+      description: PRODUCT.description,
+      payload: PRODUCT.payload,
+      providerToken: PRODUCT.providerToken,
+      startParameter: PRODUCT.startParameter,
+      currency: PRODUCT.currency,
+    };
 
     try {
-      const tgResponse = await bot.sendInvoice(
-        numericChatId,
-        PRODUCT.title,
-        PRODUCT.description,
-        PRODUCT.payload,
-        providerToken,
-        PRODUCT.startParameter,
-        currency,
-        safePrices
-      );
-
-      return res.status(200).json({ ok: true, data: tgResponse });
-    } catch (sendErr) {
-      console.error('sendInvoice error (API controller):', sendErr?.message || sendErr);
-      if (sendErr?.response?.body) {
-        console.error('Telegram response body:', sendErr.response.body);
+      const result = await sendInvoiceSafe(bot, args);
+      if (result.ok) {
+        return res.status(200).json({ ok: true, data: result.data });
       }
+      return res.status(500).json({ ok: false, error: 'Unknown error', details: result });
+    } catch (sendErr) {
+      const details = sendErr?.responseBody || sendErr?.response?.body || sendErr?.response?.data || sendErr?.stack || null;
       return res.status(500).json({
         ok: false,
         error: sendErr?.message || String(sendErr),
-        details: sendErr?.response?.body || sendErr?.response || sendErr?.stack || null,
+        details,
       });
     }
   } catch (err) {
@@ -105,25 +87,15 @@ async function getProduct(req, res) {
 
 async function getPricesPreview(req, res) {
   try {
-    const built = buildPrices();
-    const prices = deepCleanJSON(sanitizePrices(built));
-
-    let valid = false;
-    const errors = [];
-    try {
-      validatePrices(prices);
-      valid = true;
-    } catch (e) {
-      errors.push(e?.message || String(e));
-    }
+    const built = buildLabeledPricesFromProduct(PRODUCT);
+    const prices = deepCleanJSON(built);
 
     const payload = {
       currency: PRODUCT.currency,
       prices,
       rawJSON: safeJSONStringify(prices),
-      valid,
+      valid: true,
     };
-    if (errors.length > 0) payload.errors = errors;
 
     return res.status(200).json(payload);
   } catch (err) {
@@ -134,4 +106,49 @@ async function getPricesPreview(req, res) {
   }
 }
 
-module.exports = { sendInvoiceToChat, getProduct, getPricesPreview };
+// New: diagnostics and manual test endpoints
+async function testTelegramInvoice(req, res) {
+  try {
+    const { chatId } = req.body || {};
+    const numericChatId = Math.trunc(Number(chatId));
+
+    if (!numericChatId || !Number.isFinite(numericChatId) || numericChatId <= 0) {
+      return res.status(400).json({ ok: false, error: 'chatId is required and must be a number > 0' });
+    }
+
+    const args = {
+      chatId: numericChatId,
+      title: PRODUCT.title,
+      description: PRODUCT.description,
+      payload: PRODUCT.payload,
+      providerToken: PRODUCT.providerToken,
+      startParameter: PRODUCT.startParameter,
+      currency: PRODUCT.currency,
+    };
+
+    const result = await sendInvoiceSafe(bot, args);
+    return res.status(200).json(result);
+  } catch (err) {
+    const details = err?.responseBody || err?.response?.body || err?.response?.data || err?.stack || null;
+    return res.status(500).json({ ok: false, error: err?.message || String(err), details });
+  }
+}
+
+async function telegramHealth(req, res) {
+  try {
+    const prices = buildLabeledPricesFromProduct(PRODUCT);
+    const priceMinor = prices[0]?.amount || null;
+    const providerTokenMasked = maskProviderToken(PRODUCT.providerToken);
+
+    return res.status(200).json({
+      currency: PRODUCT.currency,
+      providerTokenMasked,
+      priceMinor,
+      pricesPreview: stringifyPrices(prices),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || String(err), details: err?.stack || null });
+  }
+}
+
+module.exports = { sendInvoiceToChat, getProduct, getPricesPreview, testTelegramInvoice, telegramHealth };

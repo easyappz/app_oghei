@@ -1,5 +1,5 @@
 const express = require('express');
-const { sendInvoiceToChat, getProduct, getPricesPreview } = require('@src/controllers/payments');
+const { sendInvoiceToChat, getProduct, getPricesPreview, testTelegramInvoice, telegramHealth } = require('@src/controllers/payments');
 
 const router = express.Router();
 
@@ -44,6 +44,23 @@ router.get('/payments/prices-preview', async (req, res) => {
 router.post('/payments/invoice', async (req, res) => {
   try {
     await sendInvoiceToChat(req, res);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message, details: err?.stack || null });
+  }
+});
+
+// New diagnostics routes
+router.post('/payments/telegram/invoice/test', async (req, res) => {
+  try {
+    await testTelegramInvoice(req, res);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message, details: err?.stack || null });
+  }
+});
+
+router.get('/payments/telegram/health', async (req, res) => {
+  try {
+    await telegramHealth(req, res);
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message, details: err?.stack || null });
   }

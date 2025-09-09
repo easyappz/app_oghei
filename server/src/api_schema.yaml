@@ -1,13 +1,14 @@
 openapi: 3.0.3
 info:
   title: Easyappz Payments API
-  version: 1.1.1
+  version: 1.2.0
   description: |
-    API endpoints for Telegram Payments integration (native sendInvoice). All paths are prefixed with /api on the server.
+    API endpoints for Telegram Payments integration using a safe invoice sender with HTTP fallback.
 
     Notes:
     - Prices are constructed in minor currency units (RUB -> kopecks) and validated as positive integers.
-    - Before calling Telegram, the server performs a deep JSON clean (JSON.stringify/parse) of prices to avoid serialization issues that can lead to "can't parse prices JSON object" errors.
+    - First attempt uses node-telegram-bot-api with an array of objects for prices (never a string).
+    - If Telegram returns "can't parse prices JSON object", server retries through direct HTTP with application/x-www-form-urlencoded and prices as JSON string.
 servers:
   - url: http://localhost:3001
 paths:
@@ -73,19 +74,9 @@ paths:
                         amount: 550000
                     rawJSON: '[{"label":"Арабский курс","amount":550000}]'
                     valid: true
-                invalid:
-                  value:
-                    currency: RUB
-                    prices:
-                      - label: ""
-                        amount: 0
-                    rawJSON: '[{"label":"","amount":0}]'
-                    valid: false
-                    errors:
-                      - 'prices[0].label must be a non-empty string'
   /api/payments/invoice:
     post:
-      summary: Send invoice to a Telegram chat
+      summary: Send invoice to a Telegram chat (safe with fallback)
       requestBody:
         required: true
         content:
@@ -111,7 +102,6 @@ paths:
                       message_id: 100
                       chat:
                         id: 123456789
-                      provider_payment_charge_id: null
         '400':
           description: Validation error
           content:
@@ -135,11 +125,50 @@ paths:
                     ok: false
                     error: 'ETELEGRAM: 400 Bad Request: can\'t parse prices JSON object'
                     details: '{"ok":false,"error_code":400,"description":"Bad Request: can\'t parse prices JSON object"}'
-                telegramOtherError:
-                  value:
-                    ok: false
-                    error: 'ETELEGRAM: 400 Bad Request: BAD_REQUEST'
-                    details: 'raw telegram response body if available'
+  /api/payments/telegram/invoice/test:
+    post:
+      summary: Manually trigger sending an invoice to a chat (diagnostic)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceRequest'
+            examples:
+              example1:
+                value:
+                  chatId: 123456789
+      responses:
+        '200':
+          description: Result of sendInvoiceSafe (ok=true) or detailed error (ok=false)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceResponse'
+  /api/payments/telegram/health:
+    get:
+      summary: Configuration health for Telegram Payments
+      description: Returns current currency, masked provider token, minor price value, and JSON preview of prices.
+      responses:
+        '200':
+          description: Health payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  currency:
+                    type: string
+                    example: RUB
+                  providerTokenMasked:
+                    type: string
+                    example: '381764...0649'
+                  priceMinor:
+                    type: integer
+                    example: 550000
+                  pricesPreview:
+                    type: string
+                    example: '[{"label":"Арабский курс","amount":550000}]'
 components:
   schemas:
     Product:
@@ -167,7 +196,7 @@ components:
       properties:
         label:
           type: string
-          description: Display label of the price line
+          description: Display label of the price line (1..32 symbols)
           example: "Арабский курс"
         amount:
           type: integer
@@ -190,11 +219,6 @@ components:
         valid:
           type: boolean
           example: true
-        errors:
-          type: array
-          items:
-            type: string
-          nullable: true
     InvoiceRequest:
       type: object
       required: [chatId]
@@ -210,7 +234,7 @@ components:
           type: boolean
           example: true
         data:
-          description: Raw Telegram API response when ok=true
+          description: Raw Telegram API result when ok=true
           nullable: true
         message:
           type: string

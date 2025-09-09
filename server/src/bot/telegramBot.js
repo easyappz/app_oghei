@@ -1,6 +1,8 @@
 const TelegramBot = require('node-telegram-bot-api');
+const axios = require('axios'); // Added for HTTP fallback to Telegram API
 const Payment = require('@src/models/Payment');
-const { PRODUCT, buildPrices, sanitizePrices, validatePrices, getProviderToken, getCurrencyOrThrow } = require('@src/config/product');
+const { PRODUCT } = require('@src/config/product');
+const { buildLabeledPricesFromProduct, validateTelegramPrices, stringifyPrices } = require('@src/bot/payments');
 
 // Constants (no .env as requested)
 const BOT_TOKEN = '7443123336:AAEY0axnHAS12fYJnV-JdAp_lYDuRDL1Swo';
@@ -33,6 +35,118 @@ function deepCleanJSON(value) {
   }
 }
 
+async function sendInvoiceSafe(botInstance, args) {
+  const {
+    chatId,
+    title,
+    description,
+    payload,
+    providerToken,
+    startParameter,
+    currency,
+  } = args || {};
+
+  if (!chatId) {
+    throw new Error('chatId is required');
+  }
+
+  // Build and validate prices from product configuration only
+  const pricesBuilt = buildLabeledPricesFromProduct(PRODUCT);
+  validateTelegramPrices(pricesBuilt);
+  const prices = deepCleanJSON(pricesBuilt);
+  validateTelegramPrices(prices);
+
+  // Log parameters (mask provider token)
+  const providerTokenMasked = maskProviderToken(providerToken);
+  console.log('[sendInvoiceSafe] Attempt 1 (library) ->', {
+    chatId,
+    currency,
+    providerTokenMasked,
+    pricesArrayLength: Array.isArray(prices) ? prices.length : 'n/a',
+    pricesType: typeof prices,
+    pricesJSON: safeJSONStringify(prices),
+    fieldTypes: {
+      chatId: typeof chatId,
+      title: typeof title,
+      description: typeof description,
+      payload: typeof payload,
+      providerToken: typeof providerToken,
+      startParameter: typeof startParameter,
+      currency: typeof currency,
+      prices: Array.isArray(prices) ? 'array' : typeof prices,
+    },
+  });
+
+  try {
+    // Never pass a string here. Library expects an array of objects.
+    const result = await botInstance.sendInvoice(
+      chatId,
+      title,
+      description,
+      payload,
+      providerToken,
+      startParameter,
+      currency,
+      prices
+    );
+    return { ok: true, data: result };
+  } catch (err) {
+    const msg = err?.message || String(err);
+    const body = err?.response?.body || null;
+    console.error('[sendInvoiceSafe] Library sendInvoice error:', msg);
+    if (body) console.error('[sendInvoiceSafe] Telegram response body:', body);
+
+    const isParseError = /can\'t parse prices JSON object|can't parse prices JSON object/i.test(msg) || /can't parse prices JSON object/i.test(String(body || ''));
+
+    if (!isParseError) {
+      // Not a parse error, propagate enriched
+      throw Object.assign(new Error(msg), { responseBody: body });
+    }
+
+    // Fallback: direct HTTP call with x-www-form-urlencoded and explicit JSON.stringify for prices
+    const apiUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendInvoice`;
+    const encoded = new URLSearchParams();
+    encoded.append('chat_id', String(chatId));
+    encoded.append('title', String(title));
+    encoded.append('description', String(description));
+    encoded.append('payload', String(payload));
+    encoded.append('provider_token', String(providerToken));
+    encoded.append('start_parameter', String(startParameter));
+    encoded.append('currency', String(currency));
+    encoded.append('prices', stringifyPrices(prices));
+
+    console.warn('[sendInvoiceSafe] Attempt 2 (HTTP fallback) ->', {
+      chatId,
+      currency,
+      providerTokenMasked,
+      pricesArrayLength: prices.length,
+      pricesJSON: stringifyPrices(prices),
+      contentType: 'application/x-www-form-urlencoded',
+      url: apiUrl.replace(BOT_TOKEN, '***masked***'),
+    });
+
+    try {
+      const { data } = await axios.post(apiUrl, encoded.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 15000,
+      });
+      // Telegram returns { ok: boolean, result?: object, description?: string }
+      if (data && data.ok) {
+        return { ok: true, data: data.result };
+      }
+      const description = data?.description || 'Unknown Telegram error';
+      const httpErr = new Error(`Telegram HTTP fallback error: ${description}`);
+      httpErr.telegram = data;
+      throw httpErr;
+    } catch (httpErr) {
+      const httpBody = httpErr?.response?.data || httpErr?.telegram || null;
+      console.error('[sendInvoiceSafe] HTTP fallback error:', httpErr?.message || String(httpErr));
+      if (httpBody) console.error('[sendInvoiceSafe] HTTP fallback response body:', httpBody);
+      throw Object.assign(new Error(httpErr?.message || 'HTTP fallback failed'), { responseBody: httpBody });
+    }
+  }
+}
+
 // /start command
 bot.onText(/^\/start$/, async (msg) => {
   try {
@@ -54,40 +168,25 @@ bot.on('message', async (msg) => {
 
     // Exact match "Купить"
     if (msg.text && msg.text.trim() === 'Купить') {
-      const built = buildPrices();
-      const sanitized = sanitizePrices(built);
-      validatePrices(sanitized);
-      const safePrices = deepCleanJSON(sanitized);
-      validatePrices(safePrices);
-
-      const providerToken = getProviderToken();
-      const currency = getCurrencyOrThrow();
-
-      console.log('Preparing to send invoice (bot handler):', {
+      const args = {
         chatId,
-        currency,
-        providerTokenMasked: maskProviderToken(providerToken),
-        pricesType: typeof safePrices,
-        pricesLength: Array.isArray(safePrices) ? safePrices.length : 'n/a',
-        pricesJSON: safeJSONStringify(safePrices),
-      });
+        title: PRODUCT.title,
+        description: PRODUCT.description,
+        payload: PRODUCT.payload,
+        providerToken: PRODUCT.providerToken,
+        startParameter: PRODUCT.startParameter,
+        currency: PRODUCT.currency,
+      };
 
       try {
-        await bot.sendInvoice(
-          chatId,
-          PRODUCT.title,
-          PRODUCT.description,
-          PRODUCT.payload,
-          providerToken,
-          PRODUCT.startParameter,
-          currency,
-          safePrices
-        );
-      } catch (sendErr) {
-        console.error('sendInvoice error (bot handler):', sendErr?.message || sendErr);
-        if (sendErr?.response?.body) {
-          console.error('Telegram response body:', sendErr.response.body);
+        const result = await sendInvoiceSafe(bot, args);
+        if (!result.ok) {
+          console.error('sendInvoiceSafe returned not ok in bot handler:', result);
         }
+      } catch (sendErr) {
+        console.error('sendInvoiceSafe error (bot handler):', sendErr?.message || sendErr);
+        const body = sendErr?.responseBody || sendErr?.response?.body || null;
+        if (body) console.error('Telegram error body:', body);
       }
       return;
     }
@@ -133,4 +232,4 @@ bot.on('pre_checkout_query', async (query) => {
   }
 });
 
-module.exports = bot;
+module.exports = { bot, sendInvoiceSafe };
