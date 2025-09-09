@@ -59,3 +59,13 @@ export async function getPricesPreview() {
     throw normalizeApiError(error, 'Не удалось получить предпросмотр цен');
   }
 }
+
+export async function getTelegramMeta() {
+  try {
+    const response = await instance.get('/api/payments/telegram/meta');
+    return response.data;
+  } catch (error) {
+    // UI обработает 404 как отсутствие поддержки на сервере
+    throw normalizeApiError(error, 'Не удалось получить метаданные Telegram бота');
+  }
+}
